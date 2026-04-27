@@ -7,15 +7,18 @@
  *   selectedId: string | null
  *   height:     string  (default '100%')
  *   clusterMarkers?: boolean  (default false)
- *   onMarkerClick?: (marker) => void
  *
  * Props (VolunteerDashboard mode):
  *   coords:     { lat, lng } | string | null
  *   title:      string
  *   height:     string
+ *
+ * IMPORTANT: Leaflet CSS must be imported once at app entry (index.css or main.jsx):
+ *   import 'leaflet/dist/leaflet.css'
+ * This component also injects a <style> tag as a belt-and-suspenders fallback.
  */
 
-import { useEffect, useRef, useMemo, useCallback, useState } from 'react'
+import { useEffect, useRef, useMemo, useCallback } from 'react'
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import { MapPin } from 'lucide-react'
@@ -41,58 +44,9 @@ function ensureLeafletCSS() {
 }
 ensureLeafletCSS()
 
-// ── Custom Marker Icons ───────────────────────────────────────────────────────
-
-// ✅ Volunteer-style Red Pin Marker (Teardrop shape)
-function makeVolunteerPinIcon(selected = false) {
-  const size = selected ? 36 : 30
-  const ring = selected ? `box-shadow: 0 0 0 4px #ef444440, 0 0 0 8px #ef444420;` : ''
-  
-  return L.divIcon({
-    className: '',
-    html: `
-      <div style="
-        position: relative;
-        width: ${size}px;
-        height: ${size}px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-      ">
-        ${ring}
-        <!-- Red Teardrop Pin -->
-        <div style="
-          width: ${size - 6}px;
-          height: ${size - 6}px;
-          background: #ef4444;
-          border: 3px solid white;
-          border-radius: 50% 50% 50% 0;
-          transform: rotate(-45deg);
-          box-shadow: 0 2px 6px rgba(0,0,0,0.3);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        ">
-          <!-- Inner White Dot -->
-          <div style="
-            width: 6px;
-            height: 6px;
-            border-radius: 50%;
-            background: white;
-            transform: rotate(45deg);
-          "></div>
-        </div>
-      </div>
-    `,
-    iconSize: [size, size],
-    iconAnchor: [size / 2, size], // Point to bottom center
-    popupAnchor: [0, -size],     // Popup above the pin
-  })
-}
-
-// ✅ Coordinator-style Colored Circle Marker
-function makeCoordinatorIcon(color = '#3B82F6', pulsing = false, selected = false) {
-  const size = selected ? 28 : 18
+// ── Custom colored DivIcon factory ────────────────────────────────────────────
+function makeIcon(color = '#3B82F6', pulsing = false, selected = false) {
+  const size = selected ? 24 : 16
   const ring = selected ? `box-shadow: 0 0 0 4px ${color}40, 0 0 0 8px ${color}20;` : ''
   const pulse = pulsing ? `animation: civicpulse-ping 1.4s ease-in-out infinite;` : ''
 
@@ -109,7 +63,7 @@ function makeCoordinatorIcon(color = '#3B82F6', pulsing = false, selected = fals
         ${pulse}
         position: relative;
         transition: transform 0.2s;
-      " onmouseenter="this.style.transform='scale(1.2)'" onmouseleave="this.style.transform='scale(1)'"></div>
+      " onmouseenter="this.style.transform='scale(1.1)'" onmouseleave="this.style.transform='scale(1)'"></div>
     `,
     iconSize: [size, size],
     iconAnchor: [size / 2, size / 2],
@@ -129,8 +83,7 @@ function ensurePulseStyle() {
       0%, 100% { transform: scale(1); opacity: 1; }
       50% { transform: scale(1.5); opacity: 0.6; }
     }
-    .leaflet-container { z-index: 0; }
-    /* ✅ REMOVED touch-action override to fix finger gestures */
+    .leaflet-container { z-index: 0; touch-action: pan-x pan-y; }
     .leaflet-popup-content-wrapper {
       border-radius: 12px !important;
       font-family: inherit !important;
@@ -151,22 +104,31 @@ function ensurePulseStyle() {
 }
 ensurePulseStyle()
 
-// ── Inner controller: flies the map when center/zoom changes ─────────────────
+// ── Inner controller: flies the map when center/zoom changes (debounced) ─────
 function MapFlyController({ lat, lng, zoom }) {
   const map = useMap()
   const prevRef = useRef({ lat, lng, zoom })
+  const flyTimeout = useRef(null)
+
+  const flyToLocation = useCallback((targetLat, targetLng, targetZoom) => {
+    if (flyTimeout.current) clearTimeout(flyTimeout.current)
+    flyTimeout.current = setTimeout(() => {
+      map.flyTo([targetLat, targetLng], targetZoom, { duration: 0.8, easeLinearity: 0.5 })
+    }, 100)
+  }, [map])
 
   useEffect(() => {
     const prev = prevRef.current
     if (prev.lat === lat && prev.lng === lng && prev.zoom === zoom) return
     prevRef.current = { lat, lng, zoom }
-    map.flyTo([lat, lng], zoom, { duration: 0.8, easeLinearity: 0.5 })
-  }, [map, lat, lng, zoom])
+    flyToLocation(lat, lng, zoom)
+    return () => { if (flyTimeout.current) clearTimeout(flyTimeout.current) }
+  }, [lat, lng, zoom, flyToLocation])
 
   return null
 }
 
-// ── Marker clustering helper ──────────────────────────────────────────────────
+// ── Marker clustering helper (lightweight, no external lib) ───────────────────
 function clusterMarkers(markers, threshold = 0.01) {
   const clusters = []
   const used = new Set()
@@ -216,8 +178,7 @@ function CoordinatorMap({
   center, 
   selectedId, 
   height = '100%',
-  clusterMarkers: enableClustering = false,
-  onMarkerClick
+  clusterMarkers: enableClustering = false 
 }) {
   const defaultCenter = [20.5937, 78.9629]
   const defaultZoom = 5
@@ -242,10 +203,8 @@ function CoordinatorMap({
       center={initCenter}
       zoom={initZoom}
       style={{ width: '100%', height, borderRadius: 'inherit' }}
-      // ✅ ENABLED finger gestures (touchZoom and dragging)
       scrollWheelZoom={false}
-      touchZoom={true}
-      dragging={true}
+      tap={false}
       zoomControl={true}
       aria-label="Operational map showing civic needs"
     >
@@ -262,10 +221,7 @@ function CoordinatorMap({
         <Marker
           key={m.id}
           position={[m.lat, m.lng]}
-          icon={makeCoordinatorIcon(m.color, m.pulsing, m.id === selectedId)}
-          eventHandlers={{
-            click: () => onMarkerClick?.(m)
-          }}
+          icon={makeIcon(m.color, m.pulsing, m.id === selectedId)}
           aria-label={m.popup ? `Task: ${m.popup.replace(/<[^>]*>/g, '')}` : 'Task location'}
         >
           {m.popup && (
@@ -327,10 +283,8 @@ function VolunteerTaskMap({ coords, title, height = '220px' }) {
       center={[center.lat, center.lng]}
       zoom={zoom}
       style={{ width: '100%', height, borderRadius: '12px' }}
-      // ✅ ENABLED finger gestures
       scrollWheelZoom={false}
-      touchZoom={true}
-      dragging={true}
+      tap={false}
       zoomControl={true}
       aria-label={`Map showing location: ${title || 'task'}`}
     >
@@ -338,10 +292,9 @@ function VolunteerTaskMap({ coords, title, height = '220px' }) {
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
-      {/* ✅ Using the Red Pin Marker */}
       <Marker
         position={[center.lat, center.lng]}
-        icon={makeVolunteerPinIcon(true)}
+        icon={makeIcon('#ef4444', false, true)}
         aria-label={title || 'Task location'}
       >
         {title && <Popup>{title}</Popup>}
@@ -351,7 +304,7 @@ function VolunteerTaskMap({ coords, title, height = '220px' }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Default export
+// Default export — auto-detects mode based on props
 // ─────────────────────────────────────────────────────────────────────────────
 export default function TaskMap(props) {
   if (props.coords !== undefined || props.title !== undefined || props.singleCoords !== undefined) {
