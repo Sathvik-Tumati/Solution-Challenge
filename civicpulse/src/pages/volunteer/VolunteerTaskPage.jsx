@@ -101,6 +101,10 @@
 // }
 
 
+
+
+
+
 import { useState, useMemo } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router'
 import { ArrowLeft, AlertTriangle } from 'lucide-react'
@@ -122,8 +126,12 @@ export default function VolunteerTaskPage() {
   const { user } = useSession()
   const { tasks, loading } = useVolunteerTasks(user?.uid)
   const [showResolution, setShowResolution] = useState(searchParams.get('resolve') === 'true')
-  
-  const task = useMemo(() => tasks?.find(t => t.id === id), [tasks, id])
+
+  // Support both match.id and need_id
+  const task = useMemo(
+    () => tasks?.find(t => t.id === id || t.need_id === id),
+    [tasks, id]
+  )
 
   if (loading) {
     return (
@@ -188,7 +196,7 @@ export default function VolunteerTaskPage() {
       </div>
 
       <div style={{ flex: 1, maxWidth: '600px', margin: '0 auto', width: '100%', padding: '24px', paddingBottom: '100px' }}>
-        <TaskDetailPanel 
+        <TaskDetailPanel
           task={task}
           onAccept={handleAccept}
           onDecline={handleDecline}
@@ -196,15 +204,15 @@ export default function VolunteerTaskPage() {
         />
       </div>
 
-      <Drawer 
-        isOpen={showResolution} 
-        onClose={() => setShowResolution(false)} 
+      <Drawer
+        isOpen={showResolution}
+        onClose={() => setShowResolution(false)}
         title="Submit Field Report"
       >
-        <ResolutionForm 
-          task={task} 
-          onSubmit={handleResolveSubmit} 
-          onCancel={() => setShowResolution(false)} 
+        <ResolutionForm
+          task={task}
+          onSubmit={handleResolveSubmit}
+          onCancel={() => setShowResolution(false)}
         />
       </Drawer>
     </div>
