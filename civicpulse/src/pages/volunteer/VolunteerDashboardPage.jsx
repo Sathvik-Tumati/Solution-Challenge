@@ -1,8 +1,10 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { useNavigate } from 'react-router'
 import { motion, AnimatePresence } from 'framer-motion'
 import { PlayCircle, CheckCircle2, Zap, MapPin, Star } from 'lucide-react'
-import { APIProvider, Map, AdvancedMarker } from '@vis.gl/react-google-maps'
+
+// Leaflet CSS only (components loaded dynamically to avoid Vite bundling issues)
+import 'leaflet/dist/leaflet.css'
 
 import PageTransition from '../../components/layout/PageTransition'
 import Tabs from '../../components/ui/Tabs'
@@ -24,18 +26,34 @@ import { showSuccess, showError } from '../../components/ui/Toast'
 import { T } from '../../styles/tokens'
 import useIsMobile from '../../hooks/useIsMobile'
 
-const MAPS_KEY = import.meta.env.VITE_GOOGLE_MAPS_KEY || ''
-
 // ── Helpers ──────────────────────────────────────────────────────────────────
 function normalizeCoords(task) {
-  const c = task?.coords || task?.location_coords || task?.locationCoords || null
-  if (!c) return null
-  if (Array.isArray(c) && c.length >= 2) return { lat: c[0], lng: c[1] }
-  if (typeof c === 'string') {
-    const parts = c.split(',').map(n => parseFloat(n.trim()))
-    if (parts.length === 2 && !isNaN(parts[0])) return { lat: parts[0], lng: parts[1] }
+  if (!task) return null
+
+  // 1. Check direct coordinate objects first
+  const c = task.coords || task.location_coords || task.locationCoords
+  if (c) {
+    if (Array.isArray(c) && c.length >= 2) return { lat: c[0], lng: c[1] }
+    if (typeof c === 'object' && c.lat != null && c.lng != null) return { lat: c.lat, lng: c.lng }
   }
-  if (typeof c === 'object' && c.lat && c.lng) return { lat: c.lat, lng: c.lng }
+
+  // 2. Extract coordinates from string fields
+  // Priority: raw_location -> location_hint -> location
+  const str = task.raw_location || task.location_hint || task.location || ''
+  
+  if (str && typeof str === 'string') {
+    // Regex to find (lat, lng) pattern, e.g., "(17.53, 78.38)" or "17.53, 78.38"
+    const match = str.match(/\(([-\d.]+),\s*([-\d.]+)\)/) || str.match(/^([-\d.]+),\s*([-\d.]+)$/)
+    if (match) {
+      const lat = parseFloat(match[1])
+      const lng = parseFloat(match[2])
+      // Validate that parsed numbers are actually numbers
+      if (!isNaN(lat) && !isNaN(lng)) {
+        return { lat, lng }
+      }
+    }
+  }
+
   return null
 }
 
@@ -54,12 +72,40 @@ function getUrgencyColor(urgency) {
   return { bg: '#D1FAE5', color: '#059669', label: 'LOW' }
 }
 
-// ── Map Component ─────────────────────────────────────────────────────────────
+// ── Map Component (Leaflet - Vite compatible) ───────────────────────────────
 function TaskMap({ task }) {
+  const [LeafletMap, setLeafletMap] = useState(null)
   const coords = normalizeCoords(task)
-  const defaultCenter = { lat: 17.3850, lng: 78.4867 } // Hyderabad
 
-  if (!MAPS_KEY) {
+  // Dynamically load Leaflet to bypass Vite's CommonJS/ESM mismatch
+  useEffect(() => {
+    let mounted = true
+    const loadLeaflet = async () => {
+      try {
+        const { MapContainer, TileLayer, Marker, Popup } = await import('react-leaflet')
+        const L = await import('leaflet')
+        
+        // Fix default marker icon paths for Vite/Webpack
+        delete L.default.Icon.Default.prototype._getIconUrl
+        L.default.Icon.Default.mergeOptions({
+          iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+          iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+          shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png'
+        })
+        
+        if (mounted) {
+          setLeafletMap({ MapContainer, TileLayer, Marker, Popup })
+        }
+      } catch (err) {
+        console.error('Failed to load Leaflet:', err)
+      }
+    }
+    loadLeaflet()
+    return () => { mounted = false }
+  }, [])
+
+  // Handle missing task
+  if (!task) {
     return (
       <div style={{
         height: 220, borderRadius: 16, background: T.surface2,
@@ -67,34 +113,58 @@ function TaskMap({ task }) {
         color: T.textSecondary, fontSize: 13, flexDirection: 'column', gap: 6
       }}>
         <MapPin size={20} color={T.textTertiary} />
-        Add VITE_GOOGLE_MAPS_KEY to .env
+        Select a task to view location
       </div>
     )
   }
 
-  return (
-    <APIProvider apiKey={MAPS_KEY}>
-      <div style={{ height: 220, borderRadius: 16, overflow: 'hidden' }}>
-        <Map
-          defaultCenter={coords || defaultCenter}
-          defaultZoom={coords ? 14 : 11}
-          mapId="civicpulse-volunteer"
-          disableDefaultUI
-          gestureHandling="cooperative"
-          style={{ width: '100%', height: '100%' }}
-        >
-          {coords && (
-            <AdvancedMarker position={coords} title={task?.title || 'Task Location'}>
-              <div style={{
-                width: 28, height: 28, borderRadius: '50%',
-                background: '#ef4444', border: '3px solid white',
-                boxShadow: '0 2px 8px rgba(0,0,0,0.3)'
-              }} />
-            </AdvancedMarker>
-          )}
-        </Map>
+  // Handle task with no coords
+  if (!coords) {
+    return (
+      <div style={{
+        height: 220, borderRadius: 16, background: T.surface2,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        color: T.textSecondary, fontSize: 13, flexDirection: 'column', gap: 6
+      }}>
+        <MapPin size={20} color={T.textTertiary} />
+        No coordinates available for this task
       </div>
-    </APIProvider>
+    )
+  }
+
+  // ✅ FIX: If map library isn't loaded yet, show loading state instead of crashing
+  if (!LeafletMap) {
+    return (
+      <div style={{
+        height: 220, borderRadius: 16, background: T.surface2,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        color: T.textSecondary, fontSize: 13
+      }}>
+        Loading map engine...
+      </div>
+    )
+  }
+
+  // ✅ Now safe to destructure since we know LeafletMap is not null
+  const { MapContainer, TileLayer, Marker, Popup } = LeafletMap
+
+  return (
+    <div style={{ height: 220, borderRadius: 16, overflow: 'hidden', border: `1px solid ${T.border}` }}>
+      <MapContainer
+        center={[coords.lat, coords.lng]}
+        zoom={14}
+        scrollWheelZoom={false}
+        style={{ height: '100%', width: '100%' }}
+      >
+        <TileLayer
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+        />
+        <Marker position={[coords.lat, coords.lng]}>
+          <Popup>{task?.title || 'Task Location'}</Popup>
+        </Marker>
+      </MapContainer>
+    </div>
   )
 }
 
@@ -389,7 +459,7 @@ export default function VolunteerDashboardPage() {
             </div>
           </div>
 
-          {/* ── Stats ── */}
+          {/* ── Stats  */}
           <div style={{
             display: 'grid',
             gridTemplateColumns: isMobile ? '1fr' : 'repeat(3,1fr)',
@@ -467,7 +537,7 @@ export default function VolunteerDashboardPage() {
               </div>
             </div>
 
-            {/* Map panel — desktop only */}
+            {/* Map panel — desktop only (Leaflet) */}
             {!isMobile && (
               <div style={{ position: 'sticky', top: 20 }}>
                 <div style={{
