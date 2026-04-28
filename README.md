@@ -209,83 +209,6 @@ Frontend runs at: `http://localhost:5173`
 
 ---
 
-## Environment Variables
-
-### Backend (`civicpulse-ai/.env`)
-
-```env
-GOOGLE_APPLICATION_CREDENTIALS=serviceAccount.json
-ALLOWED_ORIGINS=http://localhost:5173,http://localhost:3000
-GEMINI_API_KEY=your_gemini_api_key_here
-```
-
-> **Note:** Never commit `serviceAccount.json` or any `.env` file to version control. The `.gitignore` is already configured to exclude these.
-
-### Frontend (`civicpulse/.env`)
-
-```env
-VITE_FIREBASE_API_KEY=your_firebase_api_key
-VITE_FIREBASE_AUTH_DOMAIN=your_project.firebaseapp.com
-VITE_FIREBASE_PROJECT_ID=your_project_id
-VITE_FIREBASE_STORAGE_BUCKET=your_project.appspot.com
-VITE_FIREBASE_MESSAGING_SENDER_ID=your_sender_id
-VITE_FIREBASE_APP_ID=your_app_id
-VITE_API_BASE_URL=http://localhost:8000
-```
-
-> All Vite environment variables must be prefixed with `VITE_` to be accessible in the browser bundle.
-
----
-
-## API Reference
-
-| Method | Endpoint | Description |
-|---|---|---|
-| `POST` | `/submit-need` | Submit a new citizen need |
-| `GET` | `/needs` | Fetch all open, approved needs |
-| `GET` | `/needs/all` | Fetch all needs (coordinator view) |
-| `PATCH` | `/needs/{id}/status` | Update need status (approve, reject, escalate) |
-| `POST` | `/needs/{id}/verify` | Coordinator verifies volunteer resolution |
-| `POST` | `/run-matching` | Trigger the volunteer matching engine |
-| `GET` | `/dashboard-summary` | System-wide stats and overview |
-
----
-
-## Deployment
-
-### Frontend
-
-The React app builds to a static bundle and can be deployed to any static host:
-
-```bash
-cd civicpulse
-npm run build
-# Deploy the dist/ folder to Vercel, Netlify, or Firebase Hosting
-```
-
-### Backend
-
-The FastAPI backend is designed for containerized deployment. Google Cloud Run is the recommended target:
-
-```bash
-# Build and deploy to Cloud Run
-gcloud run deploy civicpulse-ai \
-  --source . \
-  --region us-central1 \
-  --allow-unauthenticated
-```
-
-Alternatively, deploy to any platform that supports Python ASGI servers (Railway, Render, Fly.io).
-
-### Firebase
-
-Ensure the following are configured in your Firebase project before deploying:
-- Firestore database created in production mode
-- Appropriate Firestore security rules for each collection (`needs`, `volunteers`)
-- Service account key securely injected as a Cloud Run secret or environment variable — never bundled into the container image
-
----
-
 ## Future Scope
 
 - **Emergency services integration** — Direct escalation pathways to local police, fire, and medical services
@@ -303,12 +226,12 @@ Ensure the following are configured in your Firebase project before deploying:
 
 | Name | Role |
 |---|---|
-| Sathvik Tumati | Backend & AI Pipeline |
-| *(Add team member)* | *(Role)* |
-| *(Add team member)* | *(Role)* |
-| *(Add team member)* | *(Role)* |
+| Sathvik Tumati | Backend & AI Pipeline & Firebase |
+| *Ali Mohammed Lalani* | *Frontend & Deployment & PPT* |
+| *Swapniel Jasper* | *Helped with Testing* |
+| *Danish Varma* | *Helped In PPT* |
 
-*Built for the Google Solution Challenge 2025.*
+*Built for the Google Solution Challenge 2026.*
 
 ---
 
@@ -319,3 +242,9 @@ This project is currently unlicensed. If you intend to fork or build on this wor
 ---
 
 *CivicPulse — because the speed of community response should never be limited by coordination overhead.*
+
+---
+
+##Live Link: 
+
+https://civicpulse-frontend-gubu.onrender.com
